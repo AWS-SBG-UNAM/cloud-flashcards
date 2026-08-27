@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* Modo oscuro por clase en <html> en lugar de por preferencia del sistema:
+   permite el conmutador manual de la barra superior. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Tipografia oficial: Amazon Ember
+   ---------------------------------------------------------------------------
+   Los archivos NO estan en el repositorio: Amazon Ember es una fuente con
+   licencia y no se redistribuye. Coloca los .woff2 en public/fonts/ con los
+   nombres de abajo (ver public/fonts/README.md).
+
+   Si faltan, el navegador cae en silencio al siguiente tipo de la pila y la
+   aplicacion sigue funcionando: no hay que condicionar nada.
+--------------------------------------------------------------------------- */
+@font-face {
+  font-family: "Amazon Ember";
+  src: url("/fonts/AmazonEmber-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Amazon Ember";
+  src: url("/fonts/AmazonEmber-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Amazon Ember";
+  src: url("/fonts/AmazonEmber-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Amazon Ember Mono";
+  src: url("/fonts/AmazonEmberMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------------------------------------------------------------------------
+   Paleta — AWS Builder Center, V.01 2025
+   ---------------------------------------------------------------------------
+   Los siete valores de marca se usan tal cual. Los neutros intermedios
+   (superficies, lineas, texto atenuado) NO estan en la guia: son tintes y
+   sombras derivados de Gray 850, necesarios para construir jerarquia visual.
+   Van marcados como tales.
+
+   Nota de contraste: Mint y Magenta sobre blanco no llegan a ratio legible
+   para texto (~1,7:1). Por eso en modo claro solo se usan como borde o como
+   fondo de pastilla con texto Gray 850 encima, nunca como color de texto.
+   En modo oscuro, sobre Gray 850, si funcionan como texto.
+--------------------------------------------------------------------------- */
+@theme {
+  /* --- Marca --- */
+  --color-aws-ink: #161d26; /* Gray 850  */
+  --color-aws-white: #ffffff; /* White     */
+  --color-aws-magenta: #ff57e9; /* Magenta 400 */
+  --color-aws-mint: #00e582; /* Mint 400    */
+  --color-aws-purple: #ad5cff; /* Purple 500  */
+  --color-aws-blue: #42b4ff; /* Blue 400    */
+  --color-aws-amber: #ff9900; /* Amber 400   */
+
+  /* --- Neutros derivados (no son de marca) --- */
+  --color-aws-surface: #1e2733; /* Gray 850 aclarado: tarjetas en oscuro   */
+  --color-aws-line: #2c3846; /* Gray 850 aclarado: bordes en oscuro     */
+  --color-aws-mist: #f4f6f8; /* Gray 850 al 3%: fondo en claro          */
+  --color-aws-mist-line: #dbe2e9; /* Gray 850 al 15%: bordes en claro    */
+  --color-aws-muted: #7d8b9a; /* Gray 850 al 55%: texto secundario      */
+
+  --font-sans:
+    "Amazon Ember", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    "Amazon Ember Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+   Escala global +20%
+   ---------------------------------------------------------------------------
+   Tailwind expresa espaciado, tipografia y tamanos en `rem`, asi que mover el
+   tamano base del documento escala toda la interfaz de forma proporcional. Es
+   preferible a retocar cada utilidad una por una, y respeta que el usuario
+   haya subido el tamano de fuente por defecto de su navegador.
+--------------------------------------------------------------------------- */
+html {
+  font-size: 120%;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

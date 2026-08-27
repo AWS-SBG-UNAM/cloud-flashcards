@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Cloud Flashcards - aplicacion serverless que convierte apuntes en Markdown
+  en mazos de flashcards consultables via REST API.
+
+# ---------------------------------------------------------------------------
+# Parametros
+# ---------------------------------------------------------------------------
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cloud-flashcards
+    AllowedPattern: "^[a-z][a-z0-9-]{2,30}$"
+    Description: Prefijo usado para nombrar los recursos del stack.
+
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Entorno logico al que pertenece este despliegue.
+
+  ApiStageName:
+    Type: String
+    Default: v1
+    AllowedPattern: "^[a-zA-Z0-9_-]{1,64}$"
+    Description: >
+      Stage del REST API. A diferencia del HTTP API, el REST API no admite
+      "$default": el nombre del stage siempre forma parte de la URL
+      (https://{apiId}.execute-api.{region}.amazonaws.com/{stage}).
+
+  CorsAllowOrigin:
+    Type: String
+    Default: "*"
+    Description: >
+      Origen permitido por CORS. En produccion se recomienda fijar el dominio
+      exacto del frontend (p.ej. https://flashcards.midominio.dev) en lugar de "*".
+
+# ---------------------------------------------------------------------------
+# Configuracion compartida por todas las funciones Lambda
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    Timeout: 30
+    MemorySize: 512
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref FlashcardsTable
+        LOG_LEVEL: INFO
+    Tags:
+      Project: !Ref ProjectName
+      Stage: !Ref Stage
+
+Resources:
+  # -------------------------------------------------------------------------
+  # Almacenamiento de los archivos .md
+  #
+  # NOTA IMPORTANTE (dependencia circular):
+  # El nombre del bucket se construye con !Sub a partir de parametros, NO con
+  # !Ref DecksBucket. Motivo: SAM inyecta la NotificationConfiguration en el
+  # bucket, por lo que el bucket depende de ParserFunction. Si el rol IAM de
+  # esa Lambda usara !Ref DecksBucket tendriamos el ciclo:
+  #   DecksBucket -> ParserFunction -> ParserFunctionRole -> DecksBucket
+  # Usar el nombre literal en la politica rompe el ciclo.
+  # -------------------------------------------------------------------------
+  DecksBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-decks-${Stage}-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  # -------------------------------------------------------------------------
+  # Tabla de preguntas y mazos (On-Demand)
+  #
+  # Dos tipos de item conviven en la misma tabla:
+  #   pregunta -> PK = deckId, SK = <uuid4>
+  #   mazo     -> PK = deckId, SK = "#META"
+  # "#" (0x23) ordena antes que cualquier digito hexadecimal, asi que el item
+  # del mazo siempre encabeza su particion.
+  #
+  # PATRONES DE ACCESO
+  #   1. "dame las preguntas del mazo X" -> Query en la tabla, PK = deckId
+  #   2. "dame el catalogo de mazos"     -> Query en DecksIndex, PK = "DECK"
+  #
+  # El indice es DISPERSO: solo los items de mazo llevan el atributo `entity`,
+  # asi que las preguntas ni siquiera se replican en el. Listar el catalogo es
+  # un Query barato, no un Scan de la tabla entera.
+  # -------------------------------------------------------------------------
+  FlashcardsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-questions-${Stage}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: deckId
+          AttributeType: S
+        - AttributeName: questionId
+          AttributeType: S
+        - AttributeName: entity
+          AttributeType: S
+        - AttributeName: catalogSort
+          AttributeType: S
+      KeySchema:
+        - AttributeName: deckId
+          KeyType: HASH
+        - AttributeName: questionId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: DecksIndex
+          KeySchema:
+            - AttributeName: entity
+              KeyType: HASH
+            - AttributeName: catalogSort
+              KeyType: RANGE
+          # INCLUDE en vez de ALL: el catalogo solo pinta estos campos, y
+          # proyectar de menos abarata escritura y almacenamiento del indice.
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - deckTitle
+              - category
+              - questionCount
+              - updatedAt
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Stage
+          Value: !Ref Stage
+
+  # -------------------------------------------------------------------------
+  # Lambda 1: ingesta. S3 (*.md creado) -> parseo -> DynamoDB
+  # -------------------------------------------------------------------------
+  ParserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-parser-${Stage}"
+      CodeUri: backend/parser/
+      Handler: app.lambda_handler
+      Description: Parsea un mazo en Markdown desde S3 y lo materializa en DynamoDB.
+      Policies:
+        # Solo lectura de objetos, y solo dentro de este bucket.
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ProjectName}-decks-${Stage}-${AWS::AccountId}-${AWS::Region}/*"
+        # Query para localizar las preguntas previas del mazo y BatchWriteItem
+        # para borrarlas y reescribirlas: la reingesta es idempotente.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:BatchWriteItem
+              Resource: !GetAtt FlashcardsTable.Arn
+      Events:
+        MarkdownUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref DecksBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .md
+
+  # -------------------------------------------------------------------------
+  # Lambda 2: consulta. GET /decks y GET /decks/{deckId}
+  # -------------------------------------------------------------------------
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-api-${Stage}"
+      CodeUri: backend/api/
+      Handler: app.lambda_handler
+      Description: Sirve el catalogo de mazos y las preguntas de cada uno.
+      Environment:
+        Variables:
+          # La Lambda emite la cabecera CORS porque el REST API no la inyecta
+          # en respuestas de integracion proxy (ver comentario en FlashcardsApi).
+          CORS_ALLOW_ORIGIN: !Ref CorsAllowOrigin
+      Policies:
+        # Unico permiso necesario: leer por clave de particion.
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              # El indice tiene su propio ARN: permitir la tabla no basta.
+              Resource:
+                - !GetAtt FlashcardsTable.Arn
+                - !Sub "${FlashcardsTable.Arn}/index/DecksIndex"
+      Events:
+        ListDecks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FlashcardsApi
+            Path: /decks
+            Method: GET
+        GetDeck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FlashcardsApi
+            Path: /decks/{deckId}
+            Method: GET
+
+  # -------------------------------------------------------------------------
+  # REST API (API Gateway v1)
+  #
+  # POR QUE REST Y NO HTTP API:
+  # La region mx-central-1 no ofrece API Gateway v2, asi que crear un
+  # AWS::Serverless::HttpApi falla con "HTTP APIs are not available in this
+  # AWS region". El REST API si esta disponible y es el equivalente v1.
+  #
+  # DIFERENCIA CRITICA EN CORS:
+  # El HTTP API inyecta las cabeceras CORS en TODAS las respuestas, incluidas
+  # las de una integracion proxy. El REST API NO lo hace: la propiedad `Cors`
+  # de abajo solo genera el metodo OPTIONS (preflight) con una integracion
+  # mock. En la respuesta real del GET, la cabecera
+  # Access-Control-Allow-Origin la tiene que emitir la propia Lambda.
+  # Por eso backend/api/app.py la anade, al contrario que en la version HTTP.
+  # -------------------------------------------------------------------------
+  FlashcardsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "${ProjectName}-api-${Stage}"
+      StageName: !Ref ApiStageName
+      # REGIONAL en lugar del EDGE por defecto: el endpoint edge-optimized
+      # depende de CloudFront y no esta disponible en todas las regiones.
+      EndpointConfiguration:
+        Type: REGIONAL
+      # Las comillas simples anidadas son obligatorias: estos valores acaban
+      # como mapeos de parametros de respuesta de API Gateway, que espera
+      # literales entrecomillados.
+      Cors:
+        AllowOrigin: !Sub "'${CorsAllowOrigin}'"
+        AllowHeaders: "'Content-Type'"
+        AllowMethods: "'GET,OPTIONS'"
+        MaxAge: "'600'"
+      # Sin esto, un error generado por el propio gateway (404 de ruta
+      # inexistente, 429 por throttling) llegaria al navegador sin cabeceras
+      # CORS y el fetch fallaria con un mensaje enganoso de "CORS error"
+      # en vez del codigo real.
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${CorsAllowOrigin}'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${CorsAllowOrigin}'"
+      # Tope de peticiones: acota el gasto si el endpoint queda expuesto.
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingBurstLimit: 50
+          ThrottlingRateLimit: 100
+
+  # -------------------------------------------------------------------------
+  # Retencion de logs acotada (sin esto, los log groups son "Never expire")
+  # -------------------------------------------------------------------------
+  ParserLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-parser-${Stage}"
+      RetentionInDays: 14
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-api-${Stage}"
+      RetentionInDays: 14
+
+# ---------------------------------------------------------------------------
+# Salidas
+# ---------------------------------------------------------------------------
+Outputs:
+  ApiBaseUrl:
+    Description: URL base del REST API, con el stage incluido.
+    Value: !Sub "https://${FlashcardsApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${ApiStageName}"
+
+  DecksBucketName:
+    Description: Bucket donde subir los archivos .md.
+    Value: !Ref DecksBucket
+
+  FlashcardsTableName:
+    Description: Tabla DynamoDB con las preguntas.
+    Value: !Ref FlashcardsTable

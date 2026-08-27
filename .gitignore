@@ -1,0 +1,76 @@
+sample-decks/
+
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Entornos virtuales. `.venv*` cubre tambien .venv-sam (el del SAM CLI, que
+# va aparte para no arrastrar las versiones del entorno de tests).
+.venv*/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# AWS SAM
+# ---------------------------------------------------------------------------
+.aws-sam/
+packaged.yaml
+
+# samconfig.toml queda fuera porque graba el bucket de artefactos y la cuenta
+# concretos del despliegue. El Makefile pasa los parametros de forma explicita,
+# asi que no hace falta para reproducir el deploy.
+samconfig.toml
+
+# ---------------------------------------------------------------------------
+# Node / Vite
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Playwright
+# ---------------------------------------------------------------------------
+frontend/e2e/.artifacts/
+playwright-report/
+test-results/
+blob-report/
+
+# ---------------------------------------------------------------------------
+# Tipografias con licencia
+# ---------------------------------------------------------------------------
+# Amazon Ember no se redistribuye. Se versiona el README que explica de donde
+# sacarla, no los archivos.
+frontend/public/fonts/*
+!frontend/public/fonts/README.md
+
+# ---------------------------------------------------------------------------
+# Configuracion local
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# Credenciales: nunca deberian estar aqui, pero la red de seguridad es barata.
+*.pem
+*.key
+credentials
+.aws/
+
+# ---------------------------------------------------------------------------
+# Sistema y editores
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+*.swp

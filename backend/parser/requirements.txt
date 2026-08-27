@@ -1,0 +1,4 @@
+# Sin dependencias externas.
+# boto3 y botocore ya vienen incluidos en el runtime python3.12 de Lambda, y el
+# parseo usa solo `re` de la libreria estandar. El archivo existe para que
+# `sam build` no emita advertencias.
