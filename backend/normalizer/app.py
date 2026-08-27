@@ -54,16 +54,15 @@ def _s3():
     return _s3_client
 
 
-# ---------------------------------------------------------------------------
 # Gramatica del export de Notion
-# ---------------------------------------------------------------------------
 TITLE_RE = re.compile(r"^#\s+(?P<title>.+?)\s*$")
 ORDERED_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<num>\d+)[.)]\s+(?P<text>.+?)\s*$")
 BULLET_RE = re.compile(r"^(?P<indent>[ \t]*)[-*+]\s+(?P<text>.+?)\s*$")
 
 # "Respuesta Correcta:", y tambien el "Respuesta Correcto:" que aparece en
-# exports reales. Se admite singular, plural y ambos generos.
-ANSWER_MARKER_RE = re.compile(r"^respuestas?\s+correct[ao]s?\s*:?\s*$", re.IGNORECASE)
+# exports reales. Se admite singular, plural y ambos generos. Tambien
+# admite negrita alrededor (**Respuesta Correcta**).
+ANSWER_MARKER_RE = re.compile(r"^\*{0,2}respuestas?\s+correct[ao]s?\s*\*{0,2}:?\s*$", re.IGNORECASE)
 
 # Prefijo de letra al principio de la explicacion: "c. ", "d) ".
 LETTER_RE = re.compile(r"^([a-zA-Z])\s*[.)]\s+")
@@ -129,9 +128,7 @@ def detect_format(content: str) -> str:
     return "notion" if tiene_preguntas and tiene_marcador else "unknown"
 
 
-# ---------------------------------------------------------------------------
 # Parseo
-# ---------------------------------------------------------------------------
 def _indent_width(indent: str) -> int:
     return len(indent.replace("\t", "    "))
 
@@ -195,9 +192,8 @@ def parse_notion(content: str) -> NotionDeck:
     return deck
 
 
-# ---------------------------------------------------------------------------
+
 # Resolucion de la respuesta correcta
-# ---------------------------------------------------------------------------
 def _fold(text: str) -> str:
     """Minusculas sin acentos ni puntuacion, para comparar."""
     ascii_text = (
@@ -478,9 +474,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return {"processed": resultados}
 
 
-# ---------------------------------------------------------------------------
 # Vista previa local: `python backend/normalizer/app.py archivo.md`
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":  # pragma: no cover
     import json
     import sys

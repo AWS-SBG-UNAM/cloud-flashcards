@@ -144,6 +144,72 @@ test("el marcador se reinicia al cambiar de mazo", async ({ page }) => {
   await expect(page.getByText("2 preguntas")).toBeVisible();
 });
 
+test("la tarjeta se adapta al contenido y reparte las opciones en dos columnas", async ({
+  page,
+}) => {
+  await page.goto("/");
+  // "Cómputo en AWS" viene de un export de Notion: enunciados largos y una
+  // pregunta de cinco opciones. Es el caso que reventaba el alto fijo.
+  await page.getByRole("button", { name: /Cómputo en AWS/ }).click();
+  await expect(page.getByText("1 / 16")).toBeVisible();
+
+  const tarjeta = page.locator("section").first();
+  const opciones = page.getByRole("listitem");
+
+  // --- Dos columnas: las dos primeras opciones comparten fila -----------
+  const [caja0, caja1] = [
+    await opciones.nth(0).boundingBox(),
+    await opciones.nth(1).boundingBox(),
+  ];
+  expect(caja0.y).toBeCloseTo(caja1.y, 0);
+  expect(caja1.x).toBeGreaterThan(caja0.x);
+
+  // --- Opciones de una misma fila igualadas en alto ---------------------
+  expect(caja0.height).toBeCloseTo(caja1.height, 0);
+
+  const altoPreguntaLarga = (await tarjeta.boundingBox()).height;
+
+  // --- El alto sigue al contenido, no es constante ----------------------
+  await page.getByRole("button", { name: /Siguiente/ }).click();
+  await expect(page.getByText("2 / 16")).toBeVisible();
+  const altoPreguntaCorta = (await tarjeta.boundingBox()).height;
+
+  expect(altoPreguntaLarga).not.toBe(altoPreguntaCorta);
+
+  // --- Nada se desborda de la tarjeta -----------------------------------
+  const desbordes = await page.evaluate(() => {
+    const cara = document.querySelector("section");
+    return [...cara.querySelectorAll("*")].filter(
+      (n) => n.getBoundingClientRect().right > cara.getBoundingClientRect().right + 1,
+    ).length;
+  });
+  expect(desbordes).toBe(0);
+
+  await page.screenshot({ path: `${SHOTS}/6-pregunta-larga.png`, fullPage: true });
+});
+
+test("una pregunta de cinco opciones reparte 2+2+1", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Cómputo en AWS/ }).click();
+
+  // La quinta pregunta del mazo tiene cinco opciones.
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole("button", { name: /Siguiente/ }).click();
+  }
+  await expect(page.getByText("5 / 16")).toBeVisible();
+
+  const opciones = page.getByRole("listitem");
+  await expect(opciones).toHaveCount(5);
+
+  const filas = new Set();
+  for (let i = 0; i < 5; i++) {
+    filas.add(Math.round((await opciones.nth(i).boundingBox()).y));
+  }
+  expect(filas.size).toBe(3); // 2 + 2 + 1
+
+  await page.screenshot({ path: `${SHOTS}/7-cinco-opciones.png`, fullPage: true });
+});
+
 test("un mazo inexistente muestra el error sin romper la app", async ({ page }) => {
   await page.route("**/decks/*", (route) =>
     route.fulfill({

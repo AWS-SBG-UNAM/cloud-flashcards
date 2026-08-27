@@ -49,11 +49,20 @@ build: ## sam build dentro del contenedor python3.12 (requiere Docker)
 deploy: build ## Despliegue guiado interactivo
 	$(SAM) deploy --guided --stack-name $(STACK) --region $(REGION)
 
-seed: ## Sube todos los mazos de ejemplo, conservando las carpetas de tematica
+seed: ## Sube los mazos locales, conservando las carpetas de tematica
 	@BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK) --region $(REGION) \
 	  --query "Stacks[0].Outputs[?OutputKey=='DecksBucketName'].OutputValue" --output text); \
-	echo "Subiendo a s3://$$BUCKET/"; \
-	aws s3 sync sample-decks/ s3://$$BUCKET/ --exclude "*" --include "*.md" --region $(REGION)
+	COUNT=$$(find sample-decks -name '*.md' -not -path '*/_notion/*' 2>/dev/null | wc -l | tr -d ' '); \
+	if [ "$$COUNT" -gt 0 ]; then \
+	  echo "Subiendo $$COUNT mazo(s) de sample-decks/ a s3://$$BUCKET/"; \
+	  aws s3 sync sample-decks/ s3://$$BUCKET/ --exclude "*" --include "*.md" \
+	    --exclude "_notion/*" --region $(REGION); \
+	else \
+	  echo "sample-decks/ esta vacio (la carpeta no se versiona)."; \
+	  echo "Subiendo el fixture de tests como mazo inicial para que el catalogo no salga vacio."; \
+	  aws s3 cp tests/fixtures/mazo-canonico.md \
+	    "s3://$$BUCKET/General/fundamentos-de-aws.md" --region $(REGION); \
+	fi
 
 dev: ## Servidor de desarrollo del frontend
 	cd frontend && $(NPM) run dev

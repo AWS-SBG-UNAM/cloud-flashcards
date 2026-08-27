@@ -63,10 +63,24 @@ const FACE_STYLE = {
 
 const BACK_FACE_STYLE = { ...FACE_STYLE, transform: "rotateY(180deg)" };
 
-// border-2 en vez de border: en modo claro el borde es el portador principal
-// del veredicto, y a 1px la senal quedaba demasiado debil.
+/*
+ * Las dos caras comparten UNA celda de CSS Grid (`col-start-1 row-start-1`)
+ * en lugar de apilarse con `absolute inset-0`.
+ *
+ * Es lo que permite que la tarjeta mida segun su contenido: con posicion
+ * absoluta las caras salen del flujo y el contenedor colapsa, lo que obligaba
+ * a fijarle un alto arbitrario (26rem) que sobraba en preguntas cortas y se
+ * quedaba corto en las largas. Apiladas en la misma celda, la fila mide lo que
+ * la cara mas alta y ambas se estiran a ese alto.
+ *
+ * El giro sigue funcionando porque `transform` no afecta al calculo del
+ * layout: la celda se dimensiona con las caras sin rotar.
+ *
+ * border-2 en vez de border: en modo claro el borde es el portador principal
+ * del veredicto, y a 1px la senal quedaba demasiado debil.
+ */
 const FACE_CLASS =
-  "absolute inset-0 flex flex-col rounded-2xl border-2 p-6 shadow-sm";
+  "col-start-1 row-start-1 flex flex-col rounded-2xl border-2 p-6 shadow-sm";
 
 /**
  * Tarjeta de estudio que gira sobre el eje Y al responder.
@@ -103,11 +117,11 @@ export default function Flashcard({ question, onAnswered, className = "" }) {
     // `perspective` en el contenedor externo: sin el, `rotateY` se ve como un
     // aplastamiento plano en lugar de como un giro con profundidad.
     <div
-      className={`relative h-[26rem] w-full max-w-md ${className}`}
+      className={`w-full max-w-2xl ${className}`}
       style={{ perspective: "1200px" }}
     >
       <motion.div
-        className="relative h-full w-full"
+        className="grid"
         style={{ transformStyle: "preserve-3d" }}
         initial={false}
         animate={{ rotateY: isAnswered ? 180 : 0 }}
@@ -121,17 +135,21 @@ export default function Flashcard({ question, onAnswered, className = "" }) {
           style={{ ...FACE_STYLE, pointerEvents: isAnswered ? "none" : "auto" }}
           aria-hidden={isAnswered}
         >
-          <h3 className="text-lg font-bold leading-snug text-aws-ink dark:text-aws-white">
+          <h3 className="text-lg font-bold leading-snug text-balance break-words text-aws-ink dark:text-aws-white">
             {question.prompt}
           </h3>
 
-          <ul className="mt-6 flex flex-col gap-2 overflow-y-auto">
+          {/* Dos columnas a partir de `sm`: con enunciados u opciones largos,
+              una sola columna estiraba la tarjeta muchisimo hacia abajo.
+              Los items se estiran al alto de su fila, asi que las opciones de
+              longitud dispar quedan alineadas. */}
+          <ul className="mt-6 grid gap-2 sm:grid-cols-2">
             {options.map((option, index) => (
-              <li key={`${question.questionId}-${index}`}>
+              <li key={`${question.questionId}-${index}`} className="flex">
                 <button
                   type="button"
                   onClick={() => handleSelect(index)}
-                  className="w-full rounded-xl border border-aws-mist-line bg-aws-mist px-4 py-3 text-left text-sm text-aws-ink transition-colors hover:border-aws-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-aws-blue dark:border-aws-line dark:bg-aws-ink dark:text-aws-white dark:hover:border-aws-blue"
+                  className="w-full rounded-xl border border-aws-mist-line bg-aws-mist px-4 py-3 text-left text-sm text-balance break-words text-aws-ink transition-colors hover:border-aws-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-aws-blue dark:border-aws-line dark:bg-aws-ink dark:text-aws-white dark:hover:border-aws-blue"
                 >
                   {option.text}
                 </button>
@@ -181,7 +199,7 @@ export default function Flashcard({ question, onAnswered, className = "" }) {
           </div>
 
           {question.explanation && (
-            <p className="mt-4 overflow-y-auto whitespace-pre-line border-t border-aws-mist-line pt-4 text-sm leading-relaxed text-aws-ink dark:border-aws-line dark:text-aws-white">
+            <p className="mt-4 whitespace-pre-line border-t border-aws-mist-line pt-4 text-sm leading-relaxed text-aws-ink dark:border-aws-line dark:text-aws-white">
               {question.explanation}
             </p>
           )}

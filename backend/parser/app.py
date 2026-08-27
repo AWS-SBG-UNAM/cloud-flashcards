@@ -142,9 +142,7 @@ class Deck:
     questions: list[Question] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
 # Parseo
-# ---------------------------------------------------------------------------
 def parse_markdown(content: str) -> Deck:
     """Convierte el texto de un mazo en un objeto `Deck`.
 
@@ -359,9 +357,7 @@ def replace_deck(deck_id: str, items: list[dict[str, Any]]) -> int:
     return len(items)
 
 
-# ---------------------------------------------------------------------------
 # Orquestacion
-# ---------------------------------------------------------------------------
 def process_object(bucket: str, key: str) -> dict[str, Any]:
     """Descarga, parsea y materializa un unico archivo `.md`."""
     LOGGER.info("Procesando s3://%s/%s", bucket, key)

@@ -1,1 +1,0 @@
-# Sin dependencias externas: boto3 lo provee el runtime python3.12 de Lambda.
