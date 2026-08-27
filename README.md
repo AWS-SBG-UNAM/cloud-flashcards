@@ -14,11 +14,21 @@ dependencia circular de SAM, el CORS duplicado, la reingesta que duplicaba datos
 ## Arquitectura
 
 ```
-   Autor del mazo
-        │  aws s3 cp mazo.md s3://…
-        ▼
+  Export de Notion                    Autor del mazo
+        │  aws s3 cp                        │  aws s3 cp mazo.md s3://…
+        ▼                                   │
+┌───────────────────┐                       │
+│  S3 · ImportsBucket│                      │
+└─────────┬─────────┘                       │
+          │ s3:ObjectCreated:* (.md)        │
+          ▼                                 │
+┌────────────────────────┐                  │
+│ Lambda · Normalizer     │                 │
+│  Notion -> canonico     │─────────────────┤
+└────────────────────────┘                  │
+                                            ▼
 ┌───────────────────┐   s3:ObjectCreated:*
-│   S3 · DecksBucket│───────(sufijo .md)───────┐
+│   S3 · DecksBucket│──(creado o borrado)──────┐
 │  (SSE, versionado)│                          │
 └───────────────────┘                          ▼
                                     ┌──────────────────────┐
@@ -117,8 +127,9 @@ Ejemplos completos en [`sample-decks/`](sample-decks/).
 ```
 template.yaml                        Infraestructura (AWS SAM)
 backend/
-  parser/app.py                      Lambda de ingesta  S3 → DynamoDB
-  api/app.py                         Lambda de consulta GET /decks[/{deckId}]
+  normalizer/app.py                  Lambda de importación  Notion → canónico
+  parser/app.py                      Lambda de ingesta      S3 → DynamoDB
+  api/app.py                         Lambda de consulta     GET /decks[/{deckId}]
 frontend/
   src/App.jsx                        Navegación, título, marcador, tema
   src/components/DeckPicker.jsx      Pantalla principal: catálogo por temática
@@ -128,8 +139,10 @@ frontend/
   src/index.css                      Paleta, tipografía y escala global
   public/fonts/                      Amazon Ember (no versionada, ver README)
   e2e/                               Playwright contra AWS real
-tests/                               pytest + moto (AWS simulado)
-sample-decks/
+tests/
+  fixtures/                          Mazos de prueba, versionados
+  test_*.py                          pytest + moto (AWS simulado)
+sample-decks/                        Ignorado por git: contenido de trabajo
   Bases de Datos/ Seguridad/ …       La carpeta define la temática
 Makefile                             Atajos de desarrollo
 ```
@@ -194,7 +207,8 @@ Al terminar, el stack expone tres outputs:
 | Output | Uso |
 |---|---|
 | `ApiBaseUrl` | Va a `VITE_API_BASE_URL` |
-| `DecksBucketName` | Destino de los `.md` |
+| `DecksBucketName` | Destino de los `.md` en formato canónico |
+| `ImportsBucketName` | Destino de los exports de Notion |
 | `FlashcardsTableName` | Inspección en la consola de DynamoDB |
 
 Después:
@@ -231,6 +245,99 @@ sam deploy --parameter-overrides \
 ---
 
 ## Decisiones de diseño
+
+### Importar desde Notion
+
+Un cuestionario exportado de Notion se sube al **bucket de importaciones** y
+aparece en el catálogo sin más pasos:
+
+```
+imports/ → NormalizerFunction → decks/ → ParserFunction → DynamoDB
+```
+
+Se escribe un `.md` intermedio en vez de ir directo a DynamoDB por dos motivos:
+el resultado queda **inspeccionable y editable** cuando la conversión sale rara,
+y se reutiliza el pipeline existente sin tocarlo.
+
+> **Los dos buckets son distintos a propósito.** Si la salida cayera en el mismo
+> bucket que dispara la función, se invocaría con su propio resultado en bucle
+> infinito. Un prefijo (`raw/` → `decks/`) tampoco basta por sí solo: el filtro
+> de la notificación es fácil de aflojar sin darse cuenta y el fallo se paga en
+> facturación.
+
+#### El formato de Notion es irregular
+
+La respuesta correcta viene codificada en la explicación, pero de formas
+distintas dentro del mismo archivo. En un export real de 16 preguntas:
+
+| Forma | Ejemplo | Cuántas |
+|---|---|---|
+| Prefijo de letra | `c. AWS Auto Scaling…` | 9 |
+| Prefijo numérico | `1. Las instancias Spot…` | 4 |
+| Sin prefijo alguno | `Los **Dedicated Hosts** permiten…` | 1 |
+| Dos respuestas | `d. y e. Las demás opciones…` | 2 |
+
+Y el marcador de bloque aparece como `Respuesta Correcta:` y también como
+`Respuesta Correcto:`. Un parser que solo leyera la letra fallaría en 5 de 16.
+
+#### Cascada de estrategias
+
+`resolve_answer` cruza tres pistas en vez de fiarse de una:
+
+1. **Prefijo de letra** — fiable cuando existe. `a`→1ª opción, `d. y e.`→4ª y 5ª.
+2. **Cita en el texto** — qué opción nombra la explicación, por solapamiento de
+   tokens. Es lo que resuelve las preguntas sin prefijo.
+3. **Prefijo numérico** — pista **débil**: en Notion casi siempre es la
+   numeración automática de la lista, no la respuesta. Solo se acepta si el
+   texto la respalda.
+
+Cuando dos pistas se contradicen, gana la más fiable y queda un `WARNING` en
+CloudWatch. Cuando ninguna resuelve, **la pregunta se descarta**: en una app de
+estudio una respuesta incorrecta hace más daño que una pregunta que falta.
+
+El informe de cada importación queda en los logs: cuántas se convirtieron, con
+qué estrategia, cuáles conviene revisar y cuáles se descartaron.
+
+#### Vista previa local
+
+Antes de subir nada, se puede ver qué produciría la conversión:
+
+```bash
+.venv/bin/python backend/normalizer/app.py "mi-cuestionario.md"
+```
+
+El Markdown convertido va a stdout y el informe a stderr.
+
+#### El título sale del nombre del archivo
+
+En un export de Notion el archivo lleva el nombre de la página, que es lo que
+describe el mazo; el `# H1` suele ser un encabezado interno («Cuestionario #2»)
+que no sirve en un catálogo. Además el nombre del archivo ya determina el
+`deckId`, así que título e identificador quedan alineados. Si el H1 difiere,
+queda anotado en los logs.
+
+### Borrar y renombrar mazos
+
+`ParserFunction` escucha también `s3:ObjectRemoved:*`. Sin eso, borrar o
+renombrar un `.md` dejaba el mazo huérfano en el catálogo para siempre.
+
+| Acción | Efecto |
+|---|---|
+| Renombrar la **carpeta** | El mazo se recategoriza; el `deckId` no cambia |
+| Renombrar el **archivo** | Nace un mazo nuevo y el viejo se retira |
+| Borrar el `.md` | El mazo desaparece del catálogo |
+
+> **La comprobación del `sourceKey` no es opcional.** `aws s3 mv` es copiar y
+> borrar, así que renombrar una carpeta genera dos eventos sobre el mismo
+> `deckId`: un `PUT` de la ruta nueva y un `DELETE` de la vieja. Si el `DELETE`
+> se procesara a ciegas, destruiría el mazo recién reingestado. Comparando el
+> `sourceKey` almacenado con la clave borrada, ese `DELETE` se ignora.
+>
+> S3 no garantiza el orden de entrega. Con `DELETE` primero, la guarda no
+> interviene y es la reingesta posterior la que deja el estado correcto —
+> observado así en producción, con 6 ms entre ambos eventos. Los dos órdenes
+> convergen, pero un solapamiento realmente concurrente sigue siendo posible en
+> teoría; para una colección editada a mano el riesgo es despreciable.
 
 ### Por qué REST API y no HTTP API
 
@@ -440,7 +547,7 @@ inflaba el total. Hay test de regresión en Vitest y en Playwright.
 ## Tests
 
 ```bash
-make test-backend     # 41 tests · pytest + moto (AWS simulado)
+make test-backend     # 77 tests · pytest + moto (AWS simulado)
 make test-frontend    # 26 tests · Vitest + Testing Library (componentes aislados)
 make test-e2e         #  3 tests · Playwright en navegador contra AWS real
 ```
@@ -452,6 +559,11 @@ DynamoDB— y por eso es el que detectó el bug de los saltos suaves.
 
 El backend usa **moto**, que simula S3 y DynamoDB en memoria: no hacen falta
 credenciales ni se toca ninguna cuenta real.
+
+Los fixtures viven en `tests/fixtures/` y no en `sample-decks/`: esa carpeta
+está en el `.gitignore`, así que la suite no puede depender de su contenido.
+`notion-export.md` es sintético y reproduce a propósito todas las rarezas
+encontradas en un export real.
 
 `moto` se activa desde un *fixture*, no con el decorador `@mock_aws`. Pytest
 resuelve los fixtures **antes** de entrar en el cuerpo del test, así que con el
@@ -465,6 +577,10 @@ Cobertura destacada:
 | `test_mazo_editado_elimina_las_preguntas_retiradas` | Preguntas borradas del `.md` |
 | `test_clave_con_espacios_url_encoded` | S3 entrega las claves con `+` |
 | `test_ordena_por_position_no_por_el_sort_key` | Orden real del documento |
+| `test_renombrar_la_CARPETA_no_destruye_el_mazo` | La carrera de `aws s3 mv` |
+| `test_el_prefijo_numerico_solo_vale_si_el_texto_lo_respalda` | La pista engañosa de Notion |
+| `test_no_inventa_cuando_dos_opciones_empatan` | Prefiere no resolver a adivinar |
+| `test_ida_y_vuelta_con_el_parser_canonico` | Que la conversión sea digerible |
 | `test_el_catalogo_ignora_las_preguntas` | Que el índice siga siendo disperso |
 | `test_el_catalogo_sale_ordenado_por_categoria_y_titulo` | Orden desde `catalogSort` |
 | `test_el_titulo_viene_del_item_de_mazo` | `#META` como fuente canónica |
@@ -481,7 +597,7 @@ Cobertura destacada:
 
 | Comprobación | Herramienta | Resultado |
 |---|---|---|
-| Tests del backend | pytest 9.1.1 + moto 5.2.3 | 41/41 |
+| Tests del backend | pytest 9.1.1 + moto 5.2.3 | 77/77 |
 | Tests de componentes | Vitest 3.2 + Testing Library | 26/26 |
 | Plantilla (lint) | cfn-lint 1.55.1 | limpio |
 | Plantilla (SAM) | sam validate --lint | válida |

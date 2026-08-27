@@ -1,6 +1,6 @@
 """Ingesta de mazos de flashcards escritos en Markdown.
 
-Disparador: creacion de un objeto `*.md` en el bucket de mazos.
+Disparadores: creacion y borrado de objetos `*.md` en el bucket de mazos.
 Salida: un item de DynamoDB por pregunta, mas un item "#META" por mazo.
 
 Organizacion en S3
@@ -330,6 +330,17 @@ def _purge_deck(deck_id: str) -> int:
     return deleted
 
 
+def deck_source_key(deck_id: str) -> str | None:
+    """Lee el `sourceKey` del item "#META", o None si el mazo no existe."""
+    response = _questions_table().query(
+        KeyConditionExpression=Key("deckId").eq(deck_id)
+        & Key("questionId").eq(DECK_SORT_KEY),
+        ProjectionExpression="sourceKey",
+    )
+    items = response.get("Items", [])
+    return items[0].get("sourceKey") if items else None
+
+
 def replace_deck(deck_id: str, items: list[dict[str, Any]]) -> int:
     """Reemplaza por completo el mazo: borra lo anterior y escribe lo nuevo.
 
@@ -387,6 +398,44 @@ def process_object(bucket: str, key: str) -> dict[str, Any]:
     }
 
 
+def remove_object(key: str) -> dict[str, Any]:
+    """Retira del catalogo el mazo cuyo `.md` ha desaparecido.
+
+    LA COMPROBACION DEL `sourceKey` NO ES OPCIONAL
+    ----------------------------------------------
+    `aws s3 mv` es copiar y borrar, asi que renombrar una CARPETA genera dos
+    eventos sobre el mismo `deckId` (el nombre del archivo no cambia):
+
+        PUT    "Cloud Security/iam.md"   -> reingesta el mazo con la categoria nueva
+        DELETE "Seguridad/iam.md"        -> ...y este borrado lo destruiria
+
+    Comparando el `sourceKey` almacenado con la clave borrada, ese DELETE se
+    ignora: el mazo ya apunta a la ruta nueva. Solo se purga cuando el mazo
+    sigue apuntando al archivo que efectivamente se ha ido, que es el caso de
+    renombrar el ARCHIVO o borrarlo sin mas.
+
+    Si los eventos llegaran en orden inverso (S3 no garantiza el orden), el
+    DELETE purgaria y el PUT posterior reingestaria: el resultado converge.
+    """
+    deck_id = deck_id_from_key(key)
+    almacenado = deck_source_key(deck_id)
+
+    if almacenado is None:
+        LOGGER.info("Borrado %s: el mazo %s ya no estaba", key, deck_id)
+        return {"deckId": deck_id, "key": key, "removed": 0}
+
+    if almacenado != key:
+        LOGGER.info(
+            "Borrado %s ignorado: el mazo %s ahora viene de %s",
+            key, deck_id, almacenado,
+        )
+        return {"deckId": deck_id, "key": key, "removed": 0, "supersededBy": almacenado}
+
+    borrados = _purge_deck(deck_id)
+    LOGGER.info("Mazo %s retirado del catalogo (%d items)", deck_id, borrados)
+    return {"deckId": deck_id, "key": key, "removed": borrados}
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Punto de entrada. Un evento de S3 puede traer varios registros."""
     results = []
@@ -400,6 +449,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             LOGGER.info("Ignorado (no es Markdown): %s", key)
             continue
 
-        results.append(process_object(bucket, key))
+        # Con versionado activo, un `aws s3 rm` genera DeleteMarkerCreated en
+        # lugar de Delete. Ambos significan "el archivo ya no esta".
+        if record.get("eventName", "").startswith("ObjectRemoved"):
+            results.append(remove_object(key))
+        else:
+            results.append(process_object(bucket, key))
 
     return {"processed": results}

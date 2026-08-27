@@ -14,7 +14,9 @@ def _split(items):
     preguntas = [i for i in items if i["questionId"] != DECK_SK]
     return meta, preguntas
 
-SAMPLE = Path(__file__).resolve().parent.parent / "sample-decks" / "fundamentos-de-aws.md"
+# El fixture vive junto a los tests, no en sample-decks/: esa carpeta esta en
+# el .gitignore, asi que la suite no puede depender de su contenido.
+SAMPLE = Path(__file__).resolve().parent / "fixtures" / "mazo-canonico.md"
 
 
 # --------------------------------------------------------------------------
@@ -230,3 +232,94 @@ def test_markdown_sin_preguntas_validas_no_escribe(parser_app, s3_bucket, dynamo
     assert result["processed"][0]["written"] == 0
     # Ni preguntas ni fila de catalogo: un mazo vacio no se anuncia.
     assert dynamodb_table.scan()["Items"] == []
+
+
+# --------------------------------------------------------------------------
+# Borrado: s3:ObjectRemoved:*
+# --------------------------------------------------------------------------
+def _ingest(parser_app, s3_bucket, key, body=b"# T\n\n## P\n- [x] si\n"):
+    s3_bucket.put_object(Bucket=BUCKET_NAME, Key=key, Body=body)
+    return parser_app.lambda_handler(s3_event(BUCKET_NAME, key), None)
+
+
+def _remove(parser_app, key, event_name="ObjectRemoved:Delete"):
+    return parser_app.lambda_handler(
+        s3_event(BUCKET_NAME, key, event_name=event_name), None
+    )
+
+
+def test_borrar_el_md_retira_el_mazo(parser_app, s3_bucket, dynamodb_table):
+    _ingest(parser_app, s3_bucket, "Redes/tcp.md")
+    assert len(dynamodb_table.scan()["Items"]) == 2  # #META + 1 pregunta
+
+    result = _remove(parser_app, "Redes/tcp.md")
+
+    assert result["processed"][0]["removed"] == 2
+    assert dynamodb_table.scan()["Items"] == []
+
+
+def test_el_borrado_logico_del_versionado_tambien_cuenta(parser_app, s3_bucket, dynamodb_table):
+    """Con versionado, `aws s3 rm` emite DeleteMarkerCreated, no Delete."""
+    _ingest(parser_app, s3_bucket, "Redes/tcp.md")
+
+    _remove(parser_app, "Redes/tcp.md", event_name="ObjectRemoved:DeleteMarkerCreated")
+
+    assert dynamodb_table.scan()["Items"] == []
+
+
+def test_renombrar_la_CARPETA_no_destruye_el_mazo(parser_app, s3_bucket, dynamodb_table):
+    """La carrera que hace imprescindible comparar el `sourceKey`.
+
+    `aws s3 mv` es copiar y borrar. Al mover de carpeta, el nombre del archivo
+    —y por tanto el deckId— no cambia, asi que el DELETE del objeto viejo
+    llegaria despues de la reingesta y borraria el mazo recien creado.
+    """
+    _ingest(parser_app, s3_bucket, "Seguridad/iam.md")
+    _ingest(parser_app, s3_bucket, "Cloud Security/iam.md")
+
+    result = _remove(parser_app, "Seguridad/iam.md")
+
+    assert result["processed"][0]["removed"] == 0
+    assert result["processed"][0]["supersededBy"] == "Cloud Security/iam.md"
+
+    meta, preguntas = _split(dynamodb_table.scan()["Items"])
+    assert meta["category"] == "Cloud Security", "el mazo sobrevivio con la categoria nueva"
+    assert len(preguntas) == 1
+
+
+def test_renombrar_el_ARCHIVO_deja_dos_mazos_y_el_borrado_limpia(
+    parser_app, s3_bucket, dynamodb_table
+):
+    """Aqui el deckId SI cambia, asi que el mazo viejo queda huerfano."""
+    _ingest(parser_app, s3_bucket, "Redes/tcp.md")
+    _ingest(parser_app, s3_bucket, "Redes/tcp-ip.md")
+    assert len({i["deckId"] for i in dynamodb_table.scan()["Items"]}) == 2
+
+    result = _remove(parser_app, "Redes/tcp.md")
+
+    assert result["processed"][0]["removed"] == 2
+    assert {i["deckId"] for i in dynamodb_table.scan()["Items"]} == {"tcp-ip"}
+
+
+def test_borrar_un_mazo_inexistente_no_falla(parser_app, s3_bucket, dynamodb_table):
+    result = _remove(parser_app, "Redes/no-existe.md")
+
+    assert result["processed"][0]["removed"] == 0
+
+
+def test_el_borrado_saca_el_mazo_del_catalogo(parser_app, s3_bucket, dynamodb_table):
+    """Sin el item "#META" el mazo desaparece del indice disperso."""
+    _ingest(parser_app, s3_bucket, "Redes/tcp.md")
+
+    _remove(parser_app, "Redes/tcp.md")
+
+    assert not [i for i in dynamodb_table.scan()["Items"] if i.get("entity") == "DECK"]
+
+
+def test_ignora_el_borrado_de_lo_que_no_es_markdown(parser_app, s3_bucket, dynamodb_table):
+    _ingest(parser_app, s3_bucket, "Redes/tcp.md")
+
+    result = _remove(parser_app, "Redes/notas.txt")
+
+    assert result["processed"] == []
+    assert len(dynamodb_table.scan()["Items"]) == 2

@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   Cloud Flashcards - aplicacion serverless que convierte apuntes en Markdown
-  en mazos de flashcards consultables via REST API.
+  en mazos de flashcards consultables via REST API. Incluye un pipeline de
+  importacion que normaliza cuestionarios exportados desde Notion.
 
 # ---------------------------------------------------------------------------
 # Parametros
@@ -81,6 +82,30 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
+
+  # -------------------------------------------------------------------------
+  # Bucket de importaciones: cuestionarios en formatos ajenos (Notion, etc.)
+  #
+  # POR QUE UN BUCKET APARTE Y NO UN PREFIJO DEL MISMO
+  # Si la salida del normalizador cayera en el bucket que lo dispara, la
+  # funcion se invocaria con su propio resultado en bucle infinito. Un prefijo
+  # (`raw/` -> `decks/`) tampoco basta por si solo: el filtro de la
+  # notificacion es facil de aflojar sin darse cuenta, y el fallo se paga en
+  # facturacion. Dos buckets lo hacen estructuralmente imposible.
+  # -------------------------------------------------------------------------
+  ImportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-imports-${Stage}-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   # -------------------------------------------------------------------------
   # Tabla de preguntas y mazos (On-Demand)
@@ -175,9 +200,61 @@ Resources:
                 Rules:
                   - Name: suffix
                     Value: .md
+        # Sin esto, borrar o renombrar un .md dejaba el mazo huerfano en el
+        # catalogo para siempre. Con versionado activo, `aws s3 rm` emite
+        # DeleteMarkerCreated en lugar de Delete; el comodin cubre ambos.
+        MarkdownDeleted:
+          Type: S3
+          Properties:
+            Bucket: !Ref DecksBucket
+            Events: s3:ObjectRemoved:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .md
 
   # -------------------------------------------------------------------------
-  # Lambda 2: consulta. GET /decks y GET /decks/{deckId}
+  # Lambda 2: normalizacion. imports (*.md ajeno) -> decks (*.md canonico)
+  #
+  # Escribe un .md intermedio en vez de ir directa a DynamoDB: el resultado
+  # queda inspeccionable y editable cuando la conversion sale rara, y el
+  # pipeline existente lo recoge sin cambios.
+  # -------------------------------------------------------------------------
+  NormalizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-normalizer-${Stage}"
+      CodeUri: backend/normalizer/
+      Handler: app.lambda_handler
+      Description: Convierte cuestionarios de Notion al formato canonico.
+      Environment:
+        Variables:
+          # Nombre literal, no !Ref: ver la nota de dependencia circular en
+          # DecksBucket. Se mantiene el patron aunque aqui no habria ciclo.
+          DECKS_BUCKET: !Sub "${ProjectName}-decks-${Stage}-${AWS::AccountId}-${AWS::Region}"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ProjectName}-imports-${Stage}-${AWS::AccountId}-${AWS::Region}/*"
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ProjectName}-decks-${Stage}-${AWS::AccountId}-${AWS::Region}/*"
+      Events:
+        ImportUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref ImportsBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .md
+
+  # -------------------------------------------------------------------------
+  # Lambda 3: consulta. GET /decks y GET /decks/{deckId}
   # -------------------------------------------------------------------------
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -276,6 +353,12 @@ Resources:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-parser-${Stage}"
       RetentionInDays: 14
 
+  NormalizerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-normalizer-${Stage}"
+      RetentionInDays: 14
+
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -291,8 +374,12 @@ Outputs:
     Value: !Sub "https://${FlashcardsApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${ApiStageName}"
 
   DecksBucketName:
-    Description: Bucket donde subir los archivos .md.
+    Description: Bucket de mazos en formato canonico.
     Value: !Ref DecksBucket
+
+  ImportsBucketName:
+    Description: Bucket donde subir exports de Notion para convertirlos.
+    Value: !Ref ImportsBucket
 
   FlashcardsTableName:
     Description: Tabla DynamoDB con las preguntas.

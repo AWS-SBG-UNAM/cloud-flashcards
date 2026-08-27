@@ -12,8 +12,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TABLE_NAME = "flashcards-test"
 BUCKET_NAME = "decks-test"
+IMPORTS_BUCKET = "imports-test"
 
 
 def _load(alias: str, relative_path: str):
@@ -48,6 +50,13 @@ def parser_app():
     module = _load("parser_app", "backend/parser/app.py")
     module._s3_client = None
     module._table = None
+    return module
+
+
+@pytest.fixture
+def normalizer_app():
+    module = _load("normalizer_app", "backend/normalizer/app.py")
+    module._s3_client = None
     return module
 
 
@@ -121,10 +130,29 @@ def s3_bucket(aws):
     return client
 
 
-def s3_event(bucket: str, key: str) -> dict:
+@pytest.fixture
+def import_buckets(aws, monkeypatch):
+    """Los dos buckets del pipeline de importacion.
+
+    Estan separados a proposito: con uno solo, la Lambda normalizadora se
+    dispararia con su propia salida en bucle infinito.
+    """
+    import boto3
+
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket=IMPORTS_BUCKET)
+    client.create_bucket(Bucket=BUCKET_NAME)
+    monkeypatch.setenv("DECKS_BUCKET", BUCKET_NAME)
+    return client
+
+
+def s3_event(bucket: str, key: str, event_name: str = "ObjectCreated:Put") -> dict:
     """Evento de S3 reducido a los campos que consume el handler."""
     return {
         "Records": [
-            {"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}
+            {
+                "eventName": event_name,
+                "s3": {"bucket": {"name": bucket}, "object": {"key": key}},
+            }
         ]
     }
