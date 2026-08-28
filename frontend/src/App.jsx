@@ -136,13 +136,13 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 6 }}
                 transition={{ duration: 0.2 }}
-                className="truncate text-2xl font-bold text-aws-ink dark:text-aws-white"
+                className="truncate text-3xl font-semibold leading-tight text-aws-ink dark:text-aws-white"
               >
                 {heading}
               </motion.h1>
             </AnimatePresence>
 
-            <p className="mt-1 flex items-center gap-2 text-sm text-aws-muted">
+            <p className="mt-2 flex items-center gap-2 text-sm text-aws-muted">
               {selected && (
                 <span className="rounded-full bg-aws-blue px-2 py-0.5 text-xs font-medium text-aws-ink">
                   {selected.category}

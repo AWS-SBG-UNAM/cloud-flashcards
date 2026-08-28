@@ -20,11 +20,11 @@ import { motion } from "framer-motion";
  * colores de las siguientes.
  */
 const ACCENTS = [
-  { dot: "bg-aws-blue", ring: "group-hover:border-aws-blue" },
-  { dot: "bg-aws-mint", ring: "group-hover:border-aws-mint" },
-  { dot: "bg-aws-purple", ring: "group-hover:border-aws-purple" },
-  { dot: "bg-aws-amber", ring: "group-hover:border-aws-amber" },
-  { dot: "bg-aws-magenta", ring: "group-hover:border-aws-magenta" },
+  { dot: "bg-aws-blue" },
+  { dot: "bg-aws-mint" },
+  { dot: "bg-aws-purple" },
+  { dot: "bg-aws-amber" },
+  { dot: "bg-aws-magenta" },
 ];
 
 /** Agrupa por tematica conservando el orden que ya trae el API. */
@@ -38,12 +38,12 @@ function groupByCategory(decks) {
   return [...groups.entries()];
 }
 
-function DeckCard({ deck, accent, onSelect }) {
+function DeckCard({ deck, onSelect }) {
   return (
     <button
       type="button"
       onClick={() => onSelect(deck)}
-      className={`group flex w-full flex-col items-start gap-2 rounded-2xl border border-aws-mist-line bg-aws-white p-5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-aws-blue dark:border-aws-line dark:bg-aws-surface ${accent.ring}`}
+      className="group flex w-full flex-col items-start gap-2 rounded-2xl border border-aws-mist-line bg-aws-white p-5 text-left transition-colors hover:border-aws-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-aws-blue dark:border-aws-line dark:bg-aws-surface dark:hover:border-aws-blue"
     >
       <span className="text-base font-medium text-aws-ink dark:text-aws-white">
         {deck.title}
@@ -108,8 +108,8 @@ export default function DeckPicker({ decks, onSelect, isLoading, error }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: groupIndex * 0.06 }}
           >
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wide text-aws-muted">
-              <span className={`h-2 w-2 rounded-full ${accent.dot}`} />
+            <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-aws-muted">
+              <span className={`h-2.5 w-2.5 rounded-full ${accent.dot}`} />
               {category}
               <span className="font-mono normal-case tracking-normal">
                 ({items.length})
@@ -121,7 +121,6 @@ export default function DeckPicker({ decks, onSelect, isLoading, error }) {
                 <DeckCard
                   key={deck.deckId}
                   deck={deck}
-                  accent={accent}
                   onSelect={onSelect}
                 />
               ))}
