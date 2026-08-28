@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from conftest import BUCKET_NAME, TABLE_NAME, s3_event
+from conftest import BUCKET_NAME, s3_event
 
 DECK_SK = "#META"
 
