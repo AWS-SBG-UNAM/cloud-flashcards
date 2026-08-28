@@ -16,7 +16,7 @@ NPM      := PATH="$(NODE_BIN):$$PATH" npm
 
 export SAM_CLI_TELEMETRY = 0
 
-.PHONY: ayuda entorno test test-backend test-frontend test-e2e lint validate build deploy seed dev limpiar
+.PHONY: ayuda entorno test test-backend test-frontend test-e2e lint validate build deploy seed dev clean
 
 ayuda:
 	@grep -E '^[a-z0-9-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -67,6 +67,19 @@ seed: ## Sube los mazos locales, conservando las carpetas de tematica
 dev: ## Servidor de desarrollo del frontend
 	cd frontend && $(NPM) run dev
 
-limpiar: ## Borra artefactos de build y caches
+clean: ## Borra artefactos locales y elimina el stack de AWS
 	rm -rf .aws-sam frontend/dist .pytest_cache frontend/e2e/.artifacts
 	find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+	@BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK) --region $(REGION) \
+	  --query "Stacks[0].Outputs[?OutputKey=='DecksBucketName'].OutputValue" --output text); \
+	if [ -n "$$BUCKET" ] && [ "$$BUCKET" != "None" ]; then \
+	  echo "Vaciando s3://$$BUCKET/"; \
+	  aws s3 rm "s3://$$BUCKET/" --recursive --region $(REGION); \
+	fi
+	@BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK) --region $(REGION) \
+	  --query "Stacks[0].Outputs[?OutputKey=='ImportsBucketName'].OutputValue" --output text); \
+	if [ -n "$$BUCKET" ] && [ "$$BUCKET" != "None" ]; then \
+	  echo "Vaciando s3://$$BUCKET/"; \
+	  aws s3 rm "s3://$$BUCKET/" --recursive --region $(REGION); \
+	fi
+	$(SAM) delete --stack-name $(STACK) --region $(REGION)

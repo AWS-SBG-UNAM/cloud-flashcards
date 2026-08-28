@@ -326,15 +326,11 @@ el servidor. Reinicia `npm run dev`.
 ## Limpieza
 
 ```bash
-make limpiar     # artefactos de build y cachés locales
+make clean
+```
 
-# CloudFormation no borra buckets con contenido: vacíalos primero.
-aws s3 rm "s3://$(aws cloudformation describe-stacks --stack-name $STACK --region $REGION \
-  --query "Stacks[0].Outputs[?OutputKey=='DecksBucketName'].OutputValue" --output text)" \
-  --recursive --region $REGION
-aws s3 rm "s3://$(aws cloudformation describe-stacks --stack-name $STACK --region $REGION \
-  --query "Stacks[0].Outputs[?OutputKey=='ImportsBucketName'].OutputValue" --output text)" \
-  --recursive --region $REGION
-
-sam delete --stack-name $STACK --region $REGION
+Borra los artefactos locales (`.aws-sam`, `dist`, caches) y retira el
+despliegue de AWS: vacía primero los buckets (CloudFormation se niega a borrar
+buckets con contenido) y después hace `sam delete`. Respeta `STACK` y `REGION`
+del Makefile.
 ```
