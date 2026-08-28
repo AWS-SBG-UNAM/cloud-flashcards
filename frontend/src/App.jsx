@@ -114,7 +114,7 @@ export default function App() {
       : "Cargando…";
 
   return (
-    <main className="min-h-screen bg-aws-mist px-4 py-10 transition-colors dark:bg-aws-ink">
+    <main className="min-h-screen bg-aws-mist bg-grid px-4 py-10 transition-colors dark:bg-aws-ink">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <header className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -136,13 +136,13 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 6 }}
                 transition={{ duration: 0.2 }}
-                className="truncate text-2xl font-bold text-aws-ink dark:text-aws-white"
+                className="truncate text-3xl font-semibold leading-tight text-aws-ink dark:text-aws-white"
               >
                 {heading}
               </motion.h1>
             </AnimatePresence>
 
-            <p className="mt-1 flex items-center gap-2 text-sm text-aws-muted">
+            <p className="mt-2 flex items-center gap-2 text-sm text-aws-muted">
               {selected && (
                 <span className="rounded-full bg-aws-blue px-2 py-0.5 text-xs font-medium text-aws-ink">
                   {selected.category}
