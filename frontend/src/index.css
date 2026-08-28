@@ -72,12 +72,39 @@
   --color-aws-mist: #f4f6f8; /* Gray 850 al 3%: fondo en claro          */
   --color-aws-mist-line: #dbe2e9; /* Gray 850 al 15%: bordes en claro    */
   --color-aws-muted: #7d8b9a; /* Gray 850 al 55%: texto secundario      */
+  --color-grid-line: rgb(80 96 112 / 0.22); /* lineas de la cuadricula en claro */
 
   --font-sans:
     "Amazon Ember", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --font-mono:
     "Amazon Ember Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+   Cuadricula de fondo
+   ---------------------------------------------------------------------------
+   Patron clasico con dos gradientes lineales que se repiten. `--color-grid-line`
+   controla el color (base en @theme, sobreescrito en .dark mas abajo); el tamano
+   de celda (36px) y grosor de linea (1px) dejan el fondo bien visible.
+--------------------------------------------------------------------------- */
+@utility bg-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      var(--color-grid-line) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      var(--color-grid-line) 1px,
+      transparent 1px
+    );
+  background-size: 86px 86px;
+}
+
+.dark {
+  --color-grid-line: rgb(255 255 255 / 0.06);
 }
 
 /* ---------------------------------------------------------------------------

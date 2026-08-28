@@ -114,7 +114,7 @@ export default function App() {
       : "Cargando…";
 
   return (
-    <main className="min-h-screen bg-aws-mist px-4 py-10 transition-colors dark:bg-aws-ink">
+    <main className="min-h-screen bg-aws-mist bg-grid px-4 py-10 transition-colors dark:bg-aws-ink">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <header className="flex items-start justify-between gap-4">
           <div className="min-w-0">
