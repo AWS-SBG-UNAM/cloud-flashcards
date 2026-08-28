@@ -17,11 +17,7 @@ import { motion } from "framer-motion";
  * Contrato con el backend
  * -----------------------
  * El objeto `question` es, tal cual, un elemento del array `questions` que
- * devuelve `GET /decks/{deckId}` (ver backend/api/app.py):
- *
- *   const res  = await fetch(`${import.meta.env.VITE_API_BASE_URL}/decks/${deckId}`);
- *   const deck = await res.json();
- *   return deck.questions.map((q) => <Flashcard key={q.questionId} question={q} />);
+ * devuelve `GET /decks/{deckId}` (ver backend/api/app.py).
  */
 
 const FLIP_TRANSITION = { duration: 0.6, ease: [0.22, 1, 0.36, 1] };
@@ -88,9 +84,8 @@ const FACE_CLASS =
  * @param {Object}   props
  * @param {Question} props.question    Pregunta a mostrar.
  * @param {Function} [props.onAnswered] Callback `({ questionId, isCorrect })`.
- * @param {string}   [props.className]  Clases extra para el contenedor.
  */
-export default function Flashcard({ question, onAnswered, className = "" }) {
+export default function Flashcard({ question, onAnswered }) {
   const [selectedIndex, setSelectedIndex] = useState(null);
 
   const options = question.options ?? [];
@@ -117,7 +112,7 @@ export default function Flashcard({ question, onAnswered, className = "" }) {
     // `perspective` en el contenedor externo: sin el, `rotateY` se ve como un
     // aplastamiento plano en lugar de como un giro con profundidad.
     <div
-      className={`w-full max-w-2xl ${className}`}
+      className="w-full max-w-2xl"
       style={{ perspective: "1200px" }}
     >
       <motion.div

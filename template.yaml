@@ -40,7 +40,6 @@ Globals:
     Architectures: [arm64]
     Timeout: 30
     MemorySize: 512
-    Tracing: Active
     Environment:
       Variables:
         TABLE_NAME: !Ref FlashcardsTable

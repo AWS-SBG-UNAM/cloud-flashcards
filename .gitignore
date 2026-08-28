@@ -44,13 +44,7 @@ playwright-report/
 test-results/
 blob-report/
 
-# ---------------------------------------------------------------------------
-# Tipografias con licencia
-# ---------------------------------------------------------------------------
-# Amazon Ember no se redistribuye. Se versiona el README que explica de donde
-# sacarla, no los archivos.
-frontend/public/fonts/*
-!frontend/public/fonts/README.md
+
 
 # ---------------------------------------------------------------------------
 # Configuracion local

@@ -2,8 +2,6 @@
 
 import json
 
-from conftest import TABLE_NAME
-
 
 def _put(table, deck_id, question_id, position, prompt):
     table.put_item(
