@@ -245,8 +245,10 @@ independientes que solo se conectan a través de `ApiBaseUrl` y CORS.
 2. Conecta el repositorio de GitHub (la primera vez pide instalar la
    GitHub App de Amplify) y elige la rama a publicar.
 3. Como el frontend vive en `frontend/` y no en la raíz del repo, activa
-   **Monorepo** y fija el *App root* a `frontend`. Amplify recogerá
-   `frontend/amplify.yml` automáticamente.
+   **Monorepo** y fija el *App root* a `frontend`. Amplify recoge el
+   `amplify.yml` **de la raíz del repo** automáticamente (no uno dentro de
+   `frontend/`: en modo monorepo lo busca en la raíz y exige el formato con
+   la clave `applications`, ver nota abajo).
 4. En **App settings → Environment variables**, agrega:
 
    | Variable              | Valor                                         |
@@ -256,6 +258,14 @@ independientes que solo se conectan a través de `ApiBaseUrl` y CORS.
 5. Guarda y despliega. Amplify publica en `https://<rama>.<app-id>.amplifyapp.com`.
 6. Actualiza CORS en el backend con esa URL (ver más abajo) y vuelve a
    desplegar `template.yaml`.
+
+> **Falla con `CustomerError: Monorepo spec provided without "applications"
+> key"`:** pasó exactamente esto al probar este flujo. Con **Monorepo**
+> activado, Amplify exige que el build spec use el formato con la clave
+> `applications` (una lista con `appRoot` + `frontend`), y lo busca en
+> `amplify.yml` en la raíz del repo, no dentro de `frontend/`. Ese es el
+> archivo que ya está en este repo; si lo mueves o lo reescribes en el
+> formato plano de una app no-monorepo, el build vuelve a fallar así.
 
 ### Opción B — CloudFormation (`amplify.template.yaml`)
 

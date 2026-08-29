@@ -1,0 +1,29 @@
+# Build spec para Amplify Hosting, consola en modo "Monorepo" con
+# App root = frontend. Confirmado con un deploy real: si este archivo vive
+# en frontend/amplify.yml en vez de la raiz, o si usa el formato plano (sin
+# la clave "applications"), el build falla con
+# "CustomerError: Monorepo spec provided without \"applications\" key" -
+# en modo monorepo Amplify exige este formato, y lo busca en la raiz del
+# repo, no dentro de appRoot.
+#
+# Si en cambio despliegas con amplify.template.yaml (Opcion B del README),
+# ese stack no usa el modo monorepo de la consola: define su propio
+# buildSpec inline en formato plano, con un "cd frontend" explicito.
+version: 1
+applications:
+  - appRoot: frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: dist
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*
