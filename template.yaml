@@ -36,7 +36,7 @@ Parameters:
 # Configuracion compartida por todas las funciones Lambda
 Globals:
   Function:
-    Runtime: python3.12
+    Runtime: python3.14
     Architectures: [arm64]
     Timeout: 30
     MemorySize: 512
@@ -282,7 +282,7 @@ Outputs:
 
   ApiBaseUrl:
     Description: URL base del REST API, con el stage incluido.
-    Value: !Sub "https://${FlashcardsApi}.execute-api.${AWS::URLSuffix}/${ApiStageName}"
+    Value: !Sub "https://${FlashcardsApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${ApiStageName}"
 
   DecksBucketName:
     Description: Bucket de mazos en formato canonico.
