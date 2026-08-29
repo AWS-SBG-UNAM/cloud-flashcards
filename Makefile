@@ -9,6 +9,7 @@ PIP       := $(VENV)/bin/pip
 SAM       := $(VENV_SAM)/bin/sam
 STACK           ?= cloud-flashcards
 REGION          ?= mx-central-1
+STAGE           ?= dev
 STACK_FRONTEND  ?= cloud-flashcards-frontend
 REGION_FRONTEND ?= us-east-1
 
@@ -72,7 +73,7 @@ dev: ## Servidor de desarrollo del frontend
 amplify-deploy: ## Crea/actualiza el stack de Amplify Hosting (frontend) en us-east-1
 	@test -n "$(API_BASE_URL)" || (echo "Falta API_BASE_URL (output ApiBaseUrl del stack de backend)"; exit 1)
 	@test -n "$(GITHUB_ACCESS_TOKEN)" || (echo "Falta GITHUB_ACCESS_TOKEN (token de GitHub, ver README)"; exit 1)
-	aws cloudformation deploy \
+	@aws cloudformation deploy \
 	  --template-file amplify.template.yaml \
 	  --stack-name $(STACK_FRONTEND) \
 	  --region $(REGION_FRONTEND) \
@@ -82,19 +83,44 @@ amplify-url: ## Imprime la URL de la rama publicada en Amplify
 	@aws cloudformation describe-stacks --stack-name $(STACK_FRONTEND) --region $(REGION_FRONTEND) \
 	  --query "Stacks[0].Outputs[?OutputKey=='BranchUrl'].OutputValue" --output text
 
-clean: ## Borra artefactos locales y elimina el stack de AWS
+clean: ## Borra artefactos locales, vacia los buckets y elimina el stack de AWS
 	rm -rf .aws-sam frontend/dist .pytest_cache frontend/e2e/.artifacts
 	find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 	@BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK) --region $(REGION) \
-	  --query "Stacks[0].Outputs[?OutputKey=='DecksBucketName'].OutputValue" --output text); \
+	  --query "Stacks[0].Outputs[?OutputKey=='DecksBucketName'].OutputValue" --output text 2>/dev/null); \
 	if [ -n "$$BUCKET" ] && [ "$$BUCKET" != "None" ]; then \
-	  echo "Vaciando s3://$$BUCKET/"; \
-	  aws s3 rm "s3://$$BUCKET/" --recursive --region $(REGION); \
+	  echo "Desconectando notificaciones de s3://$$BUCKET/"; \
+	  echo "(si no, borrar sus objetos reinvoca ParserFunction, que recrea su" ; \
+	  echo " log group fuera del control de CloudFormation y rompe el proximo deploy)"; \
+	  aws s3api put-bucket-notification-configuration --bucket "$$BUCKET" \
+	    --notification-configuration '{}' --region $(REGION); \
+	  echo "Vaciando s3://$$BUCKET/ (tiene versionado: se purgan versiones y delete markers)"; \
+	  TMP=$$(mktemp); \
+	  aws s3api list-object-versions --bucket "$$BUCKET" --region $(REGION) \
+	    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json > "$$TMP"; \
+	  if [ "$$(python3 -c "import json; print(len((json.load(open('$$TMP')) or {}).get('Objects') or []))")" != "0" ]; then \
+	    aws s3api delete-objects --bucket "$$BUCKET" --region $(REGION) --delete "file://$$TMP" >/dev/null; \
+	  fi; \
+	  aws s3api list-object-versions --bucket "$$BUCKET" --region $(REGION) \
+	    --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json > "$$TMP"; \
+	  if [ "$$(python3 -c "import json; print(len((json.load(open('$$TMP')) or {}).get('Objects') or []))")" != "0" ]; then \
+	    aws s3api delete-objects --bucket "$$BUCKET" --region $(REGION) --delete "file://$$TMP" >/dev/null; \
+	  fi; \
+	  rm -f "$$TMP"; \
 	fi
 	@BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK) --region $(REGION) \
-	  --query "Stacks[0].Outputs[?OutputKey=='ImportsBucketName'].OutputValue" --output text); \
+	  --query "Stacks[0].Outputs[?OutputKey=='ImportsBucketName'].OutputValue" --output text 2>/dev/null); \
 	if [ -n "$$BUCKET" ] && [ "$$BUCKET" != "None" ]; then \
 	  echo "Vaciando s3://$$BUCKET/"; \
 	  aws s3 rm "s3://$$BUCKET/" --recursive --region $(REGION); \
 	fi
-	$(SAM) delete --stack-name $(STACK) --region $(REGION)
+	$(SAM) delete --stack-name $(STACK) --region $(REGION) --no-prompts
+	@for FN in parser normalizer api; do \
+	  LG="/aws/lambda/$(STACK)-$$FN-$(STAGE)"; \
+	  if aws logs describe-log-groups --log-group-name-prefix "$$LG" --region $(REGION) \
+	    --query "logGroups[?logGroupName=='$$LG'] | [0]" --output text 2>/dev/null | grep -qv '^None$$'; then \
+	    echo "Borrando log group huerfano $$LG (recreado por Lambda al vaciar el bucket," ; \
+	    echo "ya fuera del control de CloudFormation)"; \
+	    aws logs delete-log-group --log-group-name "$$LG" --region $(REGION) 2>/dev/null || true; \
+	  fi; \
+	done

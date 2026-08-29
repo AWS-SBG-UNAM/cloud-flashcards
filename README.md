@@ -262,12 +262,15 @@ independientes que solo se conectan a través de `ApiBaseUrl` y CORS.
 Para quienes prefieren IaC en vez de configurar la consola a mano. Requiere
 un [personal access token de GitHub](https://docs.aws.amazon.com/amplify/latest/userguide/setting-up-GitHub-access.html)
 con permiso `repo` (no se guarda en el repo ni en el stack; solo se usa en
-el momento del despliegue).
+el momento del despliegue). Nunca lo pegues directo en la terminal si se
+puede evitar: `GITHUB_ACCESS_TOKEN="$(gh auth token)"` reutiliza el token
+de una sesión de `gh auth login` ya autenticada sin que el valor quede
+visible en el historial de la shell.
 
 ```bash
 make amplify-deploy \
   API_BASE_URL=https://xxxxxxxxxx.execute-api.mx-central-1.amazonaws.com/v1 \
-  GITHUB_ACCESS_TOKEN=ghp_xxx
+  GITHUB_ACCESS_TOKEN="$(gh auth token)"
 
 make amplify-url    # imprime la URL publicada
 ```
@@ -280,6 +283,16 @@ target) para que apunte a tu propio repositorio.
 
 Para retirar el stack: `aws cloudformation delete-stack --stack-name
 $(STACK_FRONTEND) --region $(REGION_FRONTEND)`.
+
+> **Falla con `"Deploy keys are disabled for this repository"`:** esta ruta
+> crea una deploy key SSH en el repo para que Amplify pueda clonarlo, y
+> varias organizaciones de GitHub (incluida `AWS-SBG-UNAM`, verificado
+> desplegando este mismo stack) desactivan las deploy keys por política de
+> seguridad. Si ves este error, la Opción B **no es viable en ese repo**:
+> usa la Opción A (consola), que se conecta vía la GitHub App de Amplify en
+> vez de una deploy key y no choca con esa restricción. El stack fallido
+> queda en `ROLLBACK_COMPLETE`; bórralo con el comando de arriba antes de
+> reintentar.
 
 ### Coordinar CORS entre regiones
 

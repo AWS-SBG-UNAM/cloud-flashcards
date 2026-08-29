@@ -282,7 +282,7 @@ Outputs:
 
   ApiBaseUrl:
     Description: URL base del REST API, con el stage incluido.
-    Value: !Sub "https://${FlashcardsApi}.execute-api.${AWS::URLSuffix}/${ApiStageName}"
+    Value: !Sub "https://${FlashcardsApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${ApiStageName}"
 
   DecksBucketName:
     Description: Bucket de mazos en formato canonico.
