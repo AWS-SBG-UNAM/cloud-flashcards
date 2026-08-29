@@ -36,7 +36,7 @@ Parameters:
 # Configuracion compartida por todas las funciones Lambda
 Globals:
   Function:
-    Runtime: python3.12
+    Runtime: python3.14
     Architectures: [arm64]
     Timeout: 30
     MemorySize: 512

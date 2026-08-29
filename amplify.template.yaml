@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cloud Flashcards - Amplify Hosting para el frontend (React + Vite).
+  Stack independiente del backend a proposito: el backend (template.yaml)
+  vive en mx-central-1 y Amplify Hosting no esta disponible en esa region,
+  asi que este stack se despliega aparte, normalmente en us-east-1.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cloud-flashcards
+    AllowedPattern: "^[a-z][a-z0-9-]{2,30}$"
+    Description: Debe coincidir con el ProjectName usado en template.yaml.
+
+  Repository:
+    Type: String
+    Default: https://github.com/AWS-SBG-UNAM/cloud-flashcards
+    Description: >
+      URL HTTPS del repositorio (sin ".git" final). En un fork, cambia esto
+      por la URL de tu propio fork.
+
+  AccessToken:
+    Type: String
+    NoEcho: true
+    Description: >
+      Personal access token de GitHub (repo scope) usado por la GitHub App de
+      Amplify para clonar y registrar el webhook. No se guarda en el stack ni
+      en este repo: pasalo por linea de comandos o variable de entorno.
+      https://docs.aws.amazon.com/amplify/latest/userguide/setting-up-GitHub-access.html
+
+  BranchName:
+    Type: String
+    Default: main
+    Description: Rama del repositorio que Amplify construye y publica.
+
+  Stage:
+    Type: String
+    Default: PRODUCTION
+    AllowedValues: [PRODUCTION, BETA, DEVELOPMENT, EXPERIMENTAL, PULL_REQUEST]
+    Description: Entorno logico de Amplify para esta rama.
+
+  ApiBaseUrl:
+    Type: String
+    Description: >
+      Output "ApiBaseUrl" del stack de backend (template.yaml), p.ej.
+      https://xxxxxxxxxx.execute-api.mx-central-1.amazonaws.com/v1. Se
+      inyecta como VITE_API_BASE_URL en el build del frontend.
+
+Resources:
+  # El codigo del frontend vive en frontend/ dentro del mismo repo que el
+  # backend, por eso el buildSpec entra a esa carpeta explicitamente en vez
+  # de usar el modo "monorepo" de la consola (que requiere configurarse
+  # aparte por rama y no es representable aqui).
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: !Sub "${ProjectName}-frontend"
+      Repository: !Ref Repository
+      AccessToken: !Ref AccessToken
+      Platform: WEB
+      EnvironmentVariables:
+        - Name: VITE_API_BASE_URL
+          Value: !Ref ApiBaseUrl
+      BuildSpec: |
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - cd frontend
+                - npm ci
+            build:
+              commands:
+                - cd frontend
+                - npm run build
+          artifacts:
+            baseDirectory: frontend/dist
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - frontend/node_modules/**/*
+      CustomRules:
+        # SPA sin router propio (una sola pantalla), pero esta regla evita
+        # 404 en recargas si en el futuro se agrega client-side routing.
+        - Source: "</^[^.]+$|\\.(?!(css|gif|ico|jpg|jpeg|js|png|svg|woff2?|json|map)$)([^.]+$)/>"
+          Target: "/index.html"
+          Status: "200"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref BranchName
+      Stage: !Ref Stage
+      EnableAutoBuild: true
+      EnvironmentVariables:
+        - Name: VITE_API_BASE_URL
+          Value: !Ref ApiBaseUrl
+
+Outputs:
+  AppId:
+    Description: Id de la app de Amplify.
+    Value: !GetAtt AmplifyApp.AppId
+
+  DefaultDomain:
+    Description: Dominio base asignado por Amplify (sin subdominio de rama).
+    Value: !GetAtt AmplifyApp.DefaultDomain
+
+  BranchUrl:
+    Description: >
+      URL publica de la rama desplegada. Usa este valor como CorsAllowOrigin
+      al redesplegar el backend.
+    Value: !Sub "https://${BranchName}.${AmplifyApp.DefaultDomain}"

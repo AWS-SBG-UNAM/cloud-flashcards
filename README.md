@@ -15,8 +15,12 @@ de otros temas.
 
 ## Arquitectura
 
-Tres Lambdas de Python 3.12, dos buckets S3, una tabla DynamoDB y un REST API
-(API Gateway v1). Todo desplegado con SAM.
+Tres Lambdas de Python 3.14, dos buckets S3, una tabla DynamoDB y un REST API
+(API Gateway v1). Todo desplegado con SAM en `mx-central-1`.
+
+El frontend (React + Vite) es un stack aparte: se publica en Amplify Hosting
+en `us-east-1`, porque Amplify no está disponible en `mx-central-1`. Ver
+[Desplegar el frontend en Amplify](#desplegar-el-frontend-en-amplify-us-east-1).
 
 ### Flujo principal: subir un mazo
 
@@ -162,12 +166,13 @@ respuesta de la Lambda, y `GatewayResponses` para errores del gateway.
 
 | Herramienta | Versión | Comprobar           |
 | ----------- | ------- | ------------------- |
-| Python      | 3.11+   | `python3 --version` |
+| Python      | 3.14    | `python3 --version` |
 | Node.js     | 20+     | `node --version`    |
 | AWS CLI     | v2      | `aws --version`     |
 
-> Las Lambdas corren en `python3.12`. Usa siempre `make build` (que añade
-> `--use-container`) para evitar el error `Binary validation failed`.
+> Las Lambdas corren en `python3.14`. Tu Python local debe coincidir (el
+> Makefile usa `.venv`, creado sobre esa versión). `make build`/`make deploy`
+> empaquetan localmente, sin Docker.
 
 ---
 
@@ -198,7 +203,7 @@ make validate  # sam validate --lint
 ### Desplegar
 
 ```bash
-make deploy    # sam build --use-container + sam deploy --guided
+make deploy    # sam build local + sam deploy --guided
 ```
 
 `--guided` pregunta nombre del stack, región y parámetros. Los defaults
@@ -224,6 +229,71 @@ make dev                                   # http://localhost:5173
 > `sample-decks/` no se versiona (está en `.gitignore`). En un clon limpio
 > `make seed` sube un fixture de `tests/fixtures/` para que el catálogo no
 > salga vacío.
+
+---
+
+## Desplegar el frontend en Amplify (us-east-1)
+
+El backend vive en `mx-central-1`, pero Amplify Hosting no está disponible
+en esa región, así que el frontend se despliega **aparte, en `us-east-1`**
+(o cualquier región donde Amplify esté disponible). Son dos stacks
+independientes que solo se conectan a través de `ApiBaseUrl` y CORS.
+
+### Opción A — Consola de Amplify (recomendada)
+
+1. En la consola de Amplify (región `us-east-1`) → **New app → Host web app**.
+2. Conecta el repositorio de GitHub (la primera vez pide instalar la
+   GitHub App de Amplify) y elige la rama a publicar.
+3. Como el frontend vive en `frontend/` y no en la raíz del repo, activa
+   **Monorepo** y fija el *App root* a `frontend`. Amplify recogerá
+   `frontend/amplify.yml` automáticamente.
+4. En **App settings → Environment variables**, agrega:
+
+   | Variable              | Valor                                         |
+   | --------------------- | ---------------------------------------------- |
+   | `VITE_API_BASE_URL`   | El `ApiBaseUrl` que imprimió `make deploy`     |
+
+5. Guarda y despliega. Amplify publica en `https://<rama>.<app-id>.amplifyapp.com`.
+6. Actualiza CORS en el backend con esa URL (ver más abajo) y vuelve a
+   desplegar `template.yaml`.
+
+### Opción B — CloudFormation (`amplify.template.yaml`)
+
+Para quienes prefieren IaC en vez de configurar la consola a mano. Requiere
+un [personal access token de GitHub](https://docs.aws.amazon.com/amplify/latest/userguide/setting-up-GitHub-access.html)
+con permiso `repo` (no se guarda en el repo ni en el stack; solo se usa en
+el momento del despliegue).
+
+```bash
+make amplify-deploy \
+  API_BASE_URL=https://xxxxxxxxxx.execute-api.mx-central-1.amazonaws.com/v1 \
+  GITHUB_ACCESS_TOKEN=ghp_xxx
+
+make amplify-url    # imprime la URL publicada
+```
+
+`REGION_FRONTEND` (default `us-east-1`) y `STACK_FRONTEND` en el Makefile
+controlan región y nombre de este stack, igual que `REGION`/`STACK` hacen
+para el backend. En un fork, cambia también el parámetro `Repository` de
+`amplify.template.yaml` (o pásalo con `--parameter-overrides` si editas el
+target) para que apunte a tu propio repositorio.
+
+Para retirar el stack: `aws cloudformation delete-stack --stack-name
+$(STACK_FRONTEND) --region $(REGION_FRONTEND)`.
+
+### Coordinar CORS entre regiones
+
+El backend (`mx-central-1`) por defecto acepta `CorsAllowOrigin=*`. Una vez
+que conoces la URL de Amplify, ciérrala al dominio real y vuelve a
+desplegar el backend:
+
+```bash
+sam deploy --stack-name $(STACK) --region mx-central-1 \
+  --parameter-overrides CorsAllowOrigin=https://main.xxxxxxxxxx.amplifyapp.com
+```
+
+Si usas un dominio propio conectado en Amplify, usa ese dominio en vez del
+`*.amplifyapp.com` por defecto.
 
 ---
 
@@ -296,11 +366,8 @@ El Markdown convertido sale por stdout y el informe por stderr.
 
 ### `sam build` falla con `Binary validation failed`
 
-Tu Python local no es 3.12. Usa `make build`, que compila dentro del contenedor.
-
-### `sam build --use-container` no arranca
-
-Docker no está corriendo. Ábrelo y comprueba con `docker info`.
+Tu Python local no coincide con el runtime `python3.14` de la plantilla.
+Recrea el `.venv` con Python 3.14 (`make entorno`).
 
 ### El navegador dice «CORS error» pero `curl` funciona
 
